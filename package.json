@@ -1,5 +1,5 @@
 {
-	"name": "security-api",
+	"name": "ipoid",
 	"version": "0.1.0",
 	"description": "A home for security related services",
 	"main": "./app.js",
@@ -16,7 +16,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://gerrit.wikimedia.org/r/wikimedia/security/security-api"
+		"url": "https://gerrit.wikimedia.org/r/mediawiki/services/ipoid"
 	},
 	"keywords": [
 		"security",

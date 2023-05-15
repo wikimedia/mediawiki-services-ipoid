@@ -8,7 +8,7 @@ services:
       dockerfile: .pipeline/local.Dockerfile
     volumes:
       - ./:/srv/service
-    image: "securityapi:local"
+    image: "ipoid:local"
     ports:
       - 6927:6927
     environment:
