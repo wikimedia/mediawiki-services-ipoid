@@ -162,7 +162,7 @@ async function importData(connection) {
                     entity.client.concentration.density : 0,
                 countries: entity.client.countries || 0,
                 location_country: entity.location.country || '',
-                risks: getEntityRisks(entity.risks) || riskTypes.UNKNOWN
+                risks: entity.risks ? getEntityRisks(entity.risks) : riskTypes.UNKNOWN
             },
             behaviors: entity.client.behaviors || [],
             proxies: entity.client.proxies || [],
