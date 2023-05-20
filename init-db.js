@@ -16,12 +16,17 @@ async function getConnection() {
        });
 }
 
-async function addTables() {
-    const connection = await getConnection();
+async function clearDb(connection) {
+    await connection.query(`DELETE FROM actor_data;
+        DELETE FROM behaviors; DELETE FROM actor_data_behaviors;
+        DELETE FROM proxies; DELETE FROM actor_data_proxies;
+        DELETE FROM tunnels; DELETE FROM actor_data_tunnels;`);
+}
+
+async function addTables(connection) {
     const schema = fs.readFileSync('./schema.sql', 'utf8');
     await connection.query('DROP TABLE actor_data;');
     await connection.query(schema);
-    connection.end();
 }
 
 const entityTypes = {
@@ -58,6 +63,66 @@ const tunnelPkids = {};
 let entryCount = 0;
 let processedEntries = 0;
 
+async function writeEntityToDb(connection, entity) {
+    // Add to actor_data
+    const pkid = await connection.query(
+        `INSERT INTO
+            actor_data (${Object.keys(entity.actor_data).toString()})
+        VALUES
+            ( ${JSON.stringify(Object.values(entity.actor_data)).slice(1, -1)} )`
+    );
+
+    // Add to behaviors
+    entity.behaviors.forEach(async (behavior) => {
+        const behaviorPkid = await connection.query(
+            'INSERT IGNORE INTO behaviors (behavior) VALUES (?);', [behavior]
+        );
+        if (behaviorPkid.insertId) {
+            behaviorPkids[behavior] = behaviorPkid.insertId;
+        }
+        await connection.query(
+            `INSERT INTO
+                actor_data_behaviors (actor_data_id,behavior_id)
+            VALUES
+                (${pkid.insertId}, ${behaviorPkids[behavior]})`
+        );
+    });
+
+    // Add to proxies
+    entity.proxies.forEach(async (proxy) => {
+        const proxyPkid = await connection.query(
+            'INSERT IGNORE INTO proxies (proxy) VALUES (?);', [proxy]
+        );
+        if (proxyPkid.insertId) {
+            proxyPkids[proxy] = proxyPkid.insertId;
+        }
+        await connection.query(
+            `INSERT INTO
+                actor_data_proxies (actor_data_id,proxy_id)
+            VALUES
+                (${pkid.insertId}, ${proxyPkids[proxy]})`
+        );
+    });
+
+    // Add to tunnels
+    entity.tunnels.forEach(async (tunnel) => {
+        const tunnelPkid = await connection.query(
+            'INSERT IGNORE INTO tunnels (tunnel) VALUES (?);', [tunnel]
+        );
+        if (tunnelPkid.insertId) {
+            tunnelPkids[tunnel] = tunnelPkid.insertId;
+        }
+        await connection.query(
+            `INSERT INTO
+                actor_data_tunnels (actor_data_id,tunnel_id)
+            VALUES
+                (${pkid.insertId}, ${tunnelPkids[tunnel]})`
+        );
+    });
+
+    processedEntries += 1;
+}
+
 async function closeConnectionWhenDone(connection) {
     if (processedEntries === entryCount) {
         await connection.end();
@@ -68,15 +133,9 @@ async function closeConnectionWhenDone(connection) {
     }
 }
 
-async function importData() {
-    const connection = await getConnection();
+async function importData(connection) {
     const lineReader = byline(fs.createReadStream(process.env.FEED_PATH).pipe(zlib.createGunzip()));
 
-    // Clear tables before processing
-    await connection.query(`DELETE FROM actor_data; 
-        DELETE FROM behaviors; DELETE FROM actor_data_behaviors;
-        DELETE FROM proxies; DELETE FROM actor_data_proxies;
-        DELETE FROM tunnels; DELETE FROM actor_data_tunnels;`);
     lineReader.on('data', async (line) => {
         entryCount += 1;
         const entity = JSON.parse(line);
@@ -110,63 +169,7 @@ async function importData() {
             tunnels: entity.tunnels || []
         };
 
-        // Add to actor_data
-        const pkid = await connection.query(
-            `INSERT INTO
-                actor_data (${Object.keys(queryObj.actor_data).toString()})
-            VALUES
-                ( ${JSON.stringify(Object.values(queryObj.actor_data)).slice(1, -1)} )`
-        );
-
-        // Add to behaviors
-        queryObj.behaviors.forEach(async (behavior) => {
-            const behaviorPkid = await connection.query(
-                'INSERT IGNORE INTO behaviors (behavior) VALUES (?);', [behavior]
-            );
-            if (behaviorPkid.insertId) {
-                behaviorPkids[behavior] = behaviorPkid.insertId;
-            }
-            await connection.query(
-                `INSERT INTO
-                    actor_data_behaviors (actor_data_id,behavior_id)
-                VALUES
-                    (${pkid.insertId}, ${behaviorPkids[behavior]})`
-            );
-        });
-
-        // Add to proxies
-        queryObj.proxies.forEach(async (proxy) => {
-            const proxyPkid = await connection.query(
-                'INSERT IGNORE INTO proxies (proxy) VALUES (?);', [proxy]
-            );
-            if (proxyPkid.insertId) {
-                proxyPkids[proxy] = proxyPkid.insertId;
-            }
-            await connection.query(
-                `INSERT INTO
-                    actor_data_proxies (actor_data_id,proxy_id)
-                VALUES
-                    (${pkid.insertId}, ${proxyPkids[proxy]})`
-            );
-        });
-
-        // Add to tunnels
-        queryObj.tunnels.forEach(async (tunnel) => {
-            const tunnelPkid = await connection.query(
-                'INSERT IGNORE INTO tunnels (tunnel) VALUES (?);', [tunnel]
-            );
-            if (tunnelPkid.insertId) {
-                tunnelPkids[tunnel] = tunnelPkid.insertId;
-            }
-            await connection.query(
-                `INSERT INTO
-                    actor_data_tunnels (actor_data_id,tunnel_id)
-                VALUES
-                    (${pkid.insertId}, ${tunnelPkids[tunnel]})`
-            );
-        });
-
-        processedEntries += 1;
+        writeEntityToDb(connection, queryObj);
     });
 
     lineReader.on('end', () => {
@@ -175,8 +178,10 @@ async function importData() {
 }
 
 async function init() {
-    await addTables();
-    await importData();
+    const connection = await getConnection();
+    await clearDb(connection);
+    await addTables(connection);
+    await importData(connection);
 }
 
 init();
